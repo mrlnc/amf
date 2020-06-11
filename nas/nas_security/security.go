@@ -10,8 +10,9 @@ import (
 	"free5gc/lib/nas"
 	"free5gc/src/amf/context"
 	"free5gc/src/amf/logger"
-	"github.com/aead/cmac"
 	"reflect"
+
+	"github.com/aead/cmac"
 )
 
 func Encode(ue *context.AmfUe, msg *nas.Message) (payload []byte, err error) {
@@ -103,10 +104,15 @@ func Encode(ue *context.AmfUe, msg *nas.Message) (payload []byte, err error) {
 }
 
 func Decode(ue *context.AmfUe, securityHeaderType uint8, payload []byte) (msg *nas.Message, err error) {
-
+	// message properties
 	integrityProtected := false
-	newSecurityContext := false
 	ciphering := false
+	newSecurityContext := false
+
+	// from UE context
+	integrityRequired := true
+	cipheringRequired := true
+
 	if ue == nil {
 		err = fmt.Errorf("amfUe is nil")
 		return
@@ -133,23 +139,30 @@ func Decode(ue *context.AmfUe, securityHeaderType uint8, payload []byte) (msg *n
 	default:
 		return nil, fmt.Errorf("Security Type[%d] is not be implemented", securityHeaderType)
 	}
-	msg = new(nas.Message)
 
 	if !ue.SecurityContextAvailable {
-		integrityProtected = false
-		newSecurityContext = false
-		ciphering = false
+		cipheringRequired = false
+		integrityRequired = false
 	}
+
+	msg = new(nas.Message)
+
 	if newSecurityContext {
 		ue.ULCountOverflow = 0
 		ue.ULCountSQN = 0
 	}
 	if ue.CipheringAlg == context.ALG_CIPHERING_128_NEA0 {
-		ciphering = false
+		cipheringRequired = false
 	}
 	if ue.IntegrityAlg == context.ALG_INTEGRITY_128_NIA0 {
-		integrityProtected = false
+		integrityRequired = false
 	}
+
+	if (integrityProtected != integrityRequired) || (ciphering != cipheringRequired) {
+		return nil, fmt.Errorf("Security Type[%d] does not match UE context (ciphering: %t, integrity: %t)",
+			securityHeaderType, cipheringRequired, integrityRequired)
+	}
+
 	if ciphering || integrityProtected {
 		securityHeader := payload[0:6]
 		sequenceNumber := payload[6]
